@@ -1,17 +1,15 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
-	"strconv"
-
-	_ "database/sql"
-
-	_ "github.com/lib/pq"
-	_ "github.com/subosito/gotenv"
+	"os"
 
 	"github.com/gorilla/mux"
+	pg "github.com/lib/pq"
+	"github.com/subosito/gotenv"
 )
 
 type Thing struct {
@@ -21,17 +19,26 @@ type Thing struct {
 }
 
 var things []Thing
+var db *sql.DB
+
+func init() {
+	gotenv.Load()
+}
 
 func main() {
+	pgUrl, err := pg.ParseURL(os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	db, err = sql.Open("postgres", pgUrl)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = db.Ping()
+	if err != nil {
+		log.Fatal(err)
+	}
 	router := mux.NewRouter()
-
-	things = append(things,
-		Thing{ID: 1, Name: "Thing 1", Maker: "Maker 1"},
-		Thing{ID: 2, Name: "Thing 2", Maker: "Maker 2"},
-		Thing{ID: 3, Name: "Thing 3", Maker: "Maker 3"},
-		Thing{ID: 4, Name: "Thing 4", Maker: "Maker 4"},
-		Thing{ID: 5, Name: "Thing 5", Maker: "Maker 5"},
-	)
 
 	router.HandleFunc("/things", getThings).Methods("GET")
 	router.HandleFunc("/things/{id}", getThing).Methods("GET")
@@ -43,56 +50,73 @@ func main() {
 }
 
 func getThings(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(things)
-}
+	var thing Thing
 
-func getThing(w http.ResponseWriter, r *http.Request) {
-	params := mux.Vars(r)
-
-	id, err := strconv.Atoi(params["id"])
+	rows, err := db.Query("SELECT * FROM things")
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer rows.Close()
 
-	for _, thing := range things {
-		if thing.ID == id {
-			json.NewEncoder(w).Encode(&thing)
-			return
+	for rows.Next() {
+		err := rows.Scan(&thing.ID, &thing.Name, &thing.Maker)
+		if err != nil {
+			log.Fatal(err)
 		}
+		things = append(things, thing)
 	}
+}
+
+func getThing(w http.ResponseWriter, r *http.Request) {
+	var thing Thing
+
+	params := mux.Vars(r)
+	id := params["id"]
+
+	rows := db.QueryRow("SELECT * FROM things WHERE id = $1", id)
+	rows.Scan(&thing.ID, &thing.Name, &thing.Maker)
+
 }
 
 func addThing(w http.ResponseWriter, r *http.Request) {
 	var thing Thing
-	_ = json.NewDecoder(r.Body).Decode(&thing)
+	var ThingID int
 
-	things = append(things, thing)
-	json.NewEncoder(w).Encode(things)
+	json.NewDecoder(r.Body).Decode(&thing)
+
+	err := db.QueryRow("INSERT INTO things(name, maker) VALUES($1, $2) RETURNING id", thing.Name, thing.Maker).Scan(&ThingID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	json.NewEncoder(w).Encode(ThingID)
 }
 
 func updateThing(w http.ResponseWriter, r *http.Request) {
 	var thing Thing
 	json.NewDecoder(r.Body).Decode(&thing)
 
-	for i, t := range things {
-		if t.ID == thing.ID {
-			things[i] = thing
-		}
+	result, err := db.Exec("UPDATE things SET name=$1, maker=$2 WHERE id=$3", &thing.Name, &thing.Maker, &thing.ID)
+	if err != nil {
+		log.Fatal(err)
 	}
-	json.NewEncoder(w).Encode(things)
+	roswUpdated, err := result.RowsAffected()
+	if err != nil {
+		log.Fatal(err)
+	}
+	json.NewEncoder(w).Encode(roswUpdated)
 }
 
 func deleteThing(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
+	id := params["id"]
 
-	id, err := strconv.Atoi(params["id"])
+	result, err := db.Exec("DELETE FROM things WHERE id=$1", id)
 	if err != nil {
 		log.Fatal(err)
 	}
-	for i, t := range things {
-		if t.ID == id {
-			things = append(things[:i], things[i+1:]...)
-		}
+	rowsDelete, err := result.RowsAffected()
+	if err != nil {
+		log.Fatal(err)
 	}
-	json.NewEncoder(w).Encode(things)
+	json.NewEncoder(w).Encode(rowsDelete)
 }
