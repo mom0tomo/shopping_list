@@ -5,20 +5,14 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"os"
 
 	"github.com/gorilla/mux"
-	pg "github.com/lib/pq"
 	"github.com/subosito/gotenv"
+
+	"github.com/mom0tomo/shopping-list/models"
 )
 
-type Thing struct {
-	ID    int    `json:"id"`
-	Name  string `json:"name"`
-	Maker string `json:"maker"`
-}
-
-var things []Thing
+var things []models.Thing
 var db *sql.DB
 
 func init() {
@@ -26,31 +20,19 @@ func init() {
 }
 
 func main() {
-	pgUrl, err := pg.ParseURL(os.Getenv("DATABASE_URL"))
-	if err != nil {
-		log.Fatal(err)
-	}
-	db, err = sql.Open("postgres", pgUrl)
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = db.Ping()
-	if err != nil {
-		log.Fatal(err)
-	}
 	router := mux.NewRouter()
 
-	router.HandleFunc("/things", getThings).Methods("GET")
-	router.HandleFunc("/things/{id}", getThing).Methods("GET")
-	router.HandleFunc("/things", addThing).Methods("POST")
-	router.HandleFunc("/things", updateThing).Methods("PUT")
-	router.HandleFunc("/things/{id}", deleteThing).Methods("DELETE")
+	router.HandleFunc("/things", getThings(db)).Methods("GET")
+	router.HandleFunc("/things/{id}", getThing(db)).Methods("GET")
+	router.HandleFunc("/things", addThing(db)).Methods("POST")
+	router.HandleFunc("/things", updateThing(db)).Methods("PUT")
+	router.HandleFunc("/things/{id}", deleteThing(db)).Methods("DELETE")
 
 	log.Fatal(http.ListenAndServe(":8080", router))
 }
 
 func getThings(w http.ResponseWriter, r *http.Request) {
-	var thing Thing
+	var thing models.Thing
 
 	rows, err := db.Query("SELECT * FROM things")
 	if err != nil {
@@ -68,7 +50,7 @@ func getThings(w http.ResponseWriter, r *http.Request) {
 }
 
 func getThing(w http.ResponseWriter, r *http.Request) {
-	var thing Thing
+	var thing models.Thing
 
 	params := mux.Vars(r)
 	id := params["id"]
@@ -79,7 +61,7 @@ func getThing(w http.ResponseWriter, r *http.Request) {
 }
 
 func addThing(w http.ResponseWriter, r *http.Request) {
-	var thing Thing
+	var thing models.Thing
 	var ThingID int
 
 	json.NewDecoder(r.Body).Decode(&thing)
@@ -92,7 +74,7 @@ func addThing(w http.ResponseWriter, r *http.Request) {
 }
 
 func updateThing(w http.ResponseWriter, r *http.Request) {
-	var thing Thing
+	var thing models.Thing
 	json.NewDecoder(r.Body).Decode(&thing)
 
 	result, err := db.Exec("UPDATE things SET name=$1, maker=$2 WHERE id=$3", &thing.Name, &thing.Maker, &thing.ID)
