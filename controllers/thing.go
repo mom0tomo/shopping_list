@@ -3,11 +3,13 @@ package controllers
 import (
 	"database/sql"
 	"encoding/json"
-	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/gorilla/mux"
+
 	"github.com/mom0tomo/shopping-list/models"
+	thingRepository "github.com/mom0tomo/shopping-list/repository/thing"
 	"github.com/mom0tomo/shopping-list/utils"
 )
 
@@ -19,15 +21,19 @@ func (c Controller) GetThings(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var thing models.Thing
 		var error models.Error
-		json.NewDecoder(r.Body).Decode(&thing)
 
 		things = []models.Thing{}
-		rows, err := db.Query("SELECT * FROM things")
+		thingRepo := thingRepository.ThingRepository{}
+		things, err := thingRepo.GetThings(db, thing, things)
 		if err != nil {
 			error.Message = "Server Error	"
 			utils.SendError(w, http.StatusInternalServerError, error)
+			return
 		}
-		defer rows.Close()
+
+		w.Header().Set("Content-Type", "application/json")
+		utils.SendSuccess(w, things)
+
 		json.NewEncoder(w).Encode(thing)
 	}
 }
@@ -35,64 +41,101 @@ func (c Controller) GetThings(db *sql.DB) http.HandlerFunc {
 func (c Controller) GetThing(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var thing models.Thing
+		var error models.Error
 
 		params := mux.Vars(r)
-		id := params["id"]
+		id, _ := strconv.Atoi(params["id"])
 
-		rows := db.QueryRow("SELECT * FROM things WHERE id=$1", id)
-		rows.Scan(&thing.ID, &thing.Name, &thing.Maker)
-		json.NewEncoder(w).Encode(thing)
+		thingRepo := thingRepository.ThingRepository{}
+
+		thing, err := thingRepo.GetThing(db, thing, id)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				error.Message = "No Thing Found"
+				utils.SendError(w, http.StatusNotFound, error)
+				return
+			} else {
+				error.Message = "Server Error	"
+				utils.SendError(w, http.StatusInternalServerError, error)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			utils.SendSuccess(w, thing)
+
+			json.NewEncoder(w).Encode(thing)
+		}
 	}
 }
 
 func (c Controller) AddThing(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
 		var thing models.Thing
-		var ThingID int
+		var error models.Error
 
 		json.NewDecoder(r.Body).Decode(&thing)
 
-		err := db.QueryRow("INSERT INTO things(name, maker) VALUES($1, $2) RETURNING id", thing.Name, thing.Maker).Scan(&ThingID)
-		if err != nil {
-			log.Fatal(err)
+		if thing.Name == "" || thing.Maker == "" {
+			error.Message = "Enter missing fields"
+			utils.SendError(w, http.StatusBadRequest, error)
+			return
 		}
-		json.NewEncoder(w).Encode(ThingID)
+
+		thingRepo := thingRepository.ThingRepository{}
+		thingID, err := thingRepo.AddThing(db, thing)
+		if err != nil {
+			error.Message = "Server Error	"
+			utils.SendError(w, http.StatusInternalServerError, error)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		utils.SendSuccess(w, thingID)
 	}
 }
 
 func (c Controller) UpdateThing(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var thing models.Thing
+		var error models.Error
 
 		json.NewDecoder(r.Body).Decode(&thing)
+		if thing.ID == 0 || thing.Name == "" || thing.Maker == "" {
+			error.Message = "All Fields are required"
+			utils.SendError(w, http.StatusBadRequest, error)
+			return
+		}
 
-		result, err := db.Exec("UPDATE things SET name=$1, maker=$2 WHERE id=$3 RETURNING id", &thing.Name, &thing.Maker, &thing.ID)
+		thingRepo := thingRepository.ThingRepository{}
+		rowsUpdated, err := thingRepo.UpdateThing(db, thing)
 		if err != nil {
-			log.Fatal(err)
+			error.Message = "Server Error	"
+			utils.SendError(w, http.StatusInternalServerError, error)
+			return
 		}
-		roswUpdated, err := result.RowsAffected()
-		if err != nil {
-			log.Fatal(err)
-		}
-		json.NewEncoder(w).Encode(roswUpdated)
+		w.Header().Set("Content-Type", "application/json")
+		utils.SendSuccess(w, rowsUpdated)
 	}
 }
 
 func (c Controller) DeleteThing(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
+		var error models.Error
 		params := mux.Vars(r)
-		id := params["id"]
 
-		result, err := db.Exec("DELETE FROM things WHERE id=$1", id)
+		thingRepo := thingRepository.ThingRepository{}
+		id, _ := strconv.Atoi(params["id"])
+
+		rowsDeleted, err := thingRepo.DeleteThing(db, id)
 		if err != nil {
-			log.Fatal(err)
+			error.Message = "Server Error	"
+			utils.SendError(w, http.StatusInternalServerError, error)
+			return
 		}
-		rowsDelete, err := result.RowsAffected()
-		if err != nil {
-			log.Fatal(err)
+		if rowsDeleted == 0 {
+			error.Message = "No Thing Found"
+			utils.SendError(w, http.StatusNotFound, error)
+			return
 		}
-		json.NewEncoder(w).Encode(rowsDelete)
+		w.Header().Set("Content-Type", "application/json")
+		utils.SendSuccess(w, rowsDeleted)
+		json.NewEncoder(w).Encode(rowsDeleted)
 	}
 }
