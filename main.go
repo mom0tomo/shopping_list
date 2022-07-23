@@ -9,6 +9,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/subosito/gotenv"
 
+	"github.com/mom0tomo/shopping-list/driver"
 	"github.com/mom0tomo/shopping-list/models"
 )
 
@@ -20,6 +21,8 @@ func init() {
 }
 
 func main() {
+	db = driver.ConnectDB()
+
 	router := mux.NewRouter()
 
 	router.HandleFunc("/things", getThings(db)).Methods("GET")
